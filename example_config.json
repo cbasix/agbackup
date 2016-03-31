@@ -1,0 +1,43 @@
+{
+
+  "access_key": "your_amazon_access_key",
+  "secret_key": "your_amazon_secret_key",
+  "vault": "your_vault_name",
+
+  "shelve_file": "~/.glaciervault.db",
+  "encryption_key": "your_encryption_password",
+
+  "backup_objects": [
+    {
+      "path": "example.txt",
+      "name": "example.txt",
+      "is_folder": false,
+      "encrypt": false
+    },{
+      "path": "example2.txt",
+      "name": "example2.txt",
+      "is_folder": false,
+      "encrypt": false
+    },{
+      "path": "example.txt",
+      "name": "example_encr",
+      "is_folder": false,
+      "add_date": true,
+      "encrypt": false
+    },{
+      "path": "hochgeheimerblubb.txt",
+      "name": "hochgeheim",
+      "is_folder": false,
+      "add_date": false,
+      "encrypt": true
+    },{
+      "path": "important_folder",
+      "name": "important_folder",
+      "is_folder": true,
+      "add_date": false,
+      "encrypt": true
+    }
+  ]
+
+
+}
