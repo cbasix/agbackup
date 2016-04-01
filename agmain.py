@@ -97,7 +97,7 @@ class Agbackup(object):
         elif os.path.isdir(backup_object['path']) and backup_object['is_folder']:
             # tar+zip it in temp folder
             targz = tempfile.TemporaryFile()
-            self._make_tarfile(targz, backup_object['path'])
+            self._make_tarfile(output_file=targz, source_dir=backup_object['path'])
 
             self._upload_e(backup_object, arch_file_description, targz)
 
@@ -148,7 +148,7 @@ class Agbackup(object):
             raise NotReadyYet("AWS Glacier job not ready yet, it takes 3 to 5 hours")
 
         decrypted = None
-        if selected_object['enkrypt']:
+        if selected_object['encrypt']:
             decrypted = tempfile.TemporaryFile()
             self.crypt.decrypt(archived, decrypted)
         else:
@@ -156,7 +156,7 @@ class Agbackup(object):
 
         if selected_object['is_folder']:
             #unpack file and write into dest_folder
-            self._extract_tarfile(decrypted, out_path)
+            self._extract_tarfile(output_folder=out_path, source_file=decrypted)
 
         else:
             if not os.path.exists(out_path) or force:
@@ -178,6 +178,7 @@ class Agbackup(object):
         # Warning  Never extract archives from untrusted sources without prior inspection.
         # It is possible that files are created outside of path, e.g. members that have absolute
         # filenames starting with "/" or filenames with two dots "..".
+        source_file.seek(0)
 
         if not os.path.exists(output_folder):
             os.mkdir(output_folder)
@@ -188,7 +189,7 @@ class Agbackup(object):
 def init_argparse():
     # create the top-level parser
     parser = argparse.ArgumentParser(prog='AmazonGlacierBackup')
-    # parser.add_argument('--foo', action='store_true', help='foo help')
+    parser.add_argument('-c', dest='conf_file', help='Path to alternative config file', default=None)
     subparsers = parser.add_subparsers(help='There are 2 subcommands. archive and retrive', dest='mode')
 
     # create the parser for the "archive" command
@@ -209,7 +210,11 @@ def init_argparse():
 def main():
     parser = init_argparse()
     arg = parser.parse_args()
-    agb = Agbackup('config.json')
+
+    if arg.conf_file is None:
+        agb = Agbackup('config.json')
+    else:
+        agb = Agbackup(arg.conf_file)
 
     if arg.mode == 'archive':
         agb.backup(arg.name)
