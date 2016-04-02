@@ -64,4 +64,5 @@ class AESCipher(object):
             out_file.write(decryptor.decrypt(chunk))
 
         out_file.truncate(origsize)
+        out_file.flush()
 

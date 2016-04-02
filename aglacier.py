@@ -4,12 +4,21 @@ import os
 import shelve
 import boto3
 import json
-import re
+from datetime import datetime
+import random
 
 
 
 class ConfigError(Exception):
     pass
+
+def json_datetime_serial(obj):
+    """JSON serializer for date objects not serializable by default json code"""
+
+    if isinstance(obj, datetime):
+        serial = obj.isoformat()
+        return serial
+    raise TypeError("Type not serializable")
 
 
 class glacier_shelve(object):
@@ -21,6 +30,12 @@ class glacier_shelve(object):
 
     def __enter__(self):
         self.shelve = shelve.open(self.shelve_file)
+
+        if "jobs" not in self.shelve:
+            self.shelve["jobs"] = dict()
+
+        if "archive_objects" not in self.shelve:
+            self.shelve["archive_objects"] = dict()
 
         return self.shelve
 
@@ -62,97 +77,97 @@ class GlacierVault:
         self.shelve_file = os.path.expanduser(shelve_file)
         # self.vault = layer2.get_vault(vault_name)
 
-    def upload(self, filename=None,  archive_name=None, print_info=False, fileobj=None,):
+    def upload(self, fileobj, arch_descr, print_info=False, dummy=False):
         """
         Upload filename and store the archive id for future retrieval
         """
-        if archive_name is None:
-            archive_name = filename
 
         if print_info:
-            print("Uploading file '{}' with name '{}'".format(filename, archive_name))
-        # archive_id = self.vault.create_archive_from_file(
-        # filename, description=filename)
-        if fileobj is None:
-            file = open(filename, "rb",)
+            print("Uploading '{}'".format(arch_descr))
+
+        fileobj.seek(0)
+        if not dummy:
+            archive = self.vault.upload_archive(
+                archiveDescription=json.dumps(arch_descr, default=json_datetime_serial),
+                body=fileobj
+            )
         else:
-            file = fileobj
-            file.seek(0)
-        archive = self.vault.upload_archive(
-            archiveDescription=archive_name,
-            body=file
-        )
+            arch_id = random.randint(0, 9999999999)
+            d = open("vault/f{}.txt".format(arch_id), 'wb')
+            d.write(fileobj.read())
+            d.close()
+
         # Storing the filename => archive_id data.
         with glacier_shelve(self.shelve_file) as d:
-            if not "archives" in d:
-                d["archives"] = dict()
+            archive_objects = d["archive_objects"]
 
-            archives = d["archives"]
-            archives[archive_name] = archive.id
-            d["archives"] = archives
+            if not dummy:
+                arch_descr['id'] = archive.id
+            else:
+                arch_descr['id'] = arch_id
+            archive_objects[arch_descr['name']] = {arch_descr['id']: arch_descr}
 
-    def get_archive_id(self, archive_name):
+            #write to shelve
+            d["archive_objects"] = archive_objects
+
+    def get_archive_list(self, arch_obj_name=None):
         """
-        Get the archive_id corresponding to the filename
+
         """
         with glacier_shelve(self.shelve_file) as d:
-            if not "archives" in d:
-                d["archives"] = dict()
+            archive_objects = d["archive_objects"]
 
-            archives = d["archives"]
+            if arch_obj_name is None:
+                return archive_objects
 
-            if archive_name in archives:
-                return archives[archive_name]
+            if arch_obj_name in archive_objects:
+                return archive_objects[arch_obj_name]
 
         return None
 
-    def get_latest_name(self, search_name):
-        with glacier_shelve(self.shelve_file) as d:
-            if not "archives" in d:
-                d["archives"] = dict()
+    # def get_latest_name(self, search_name):
+    #     with glacier_shelve(self.shelve_file) as d:
+    #         archives = d["archives"]
+    #
+    #         latest = None
+    #         for archive_name in sorted(archives):
+    #             m = re.search('(.*)_\d{4}-\d{2}-\d{2}', archive_name)
+    #             rest = None
+    #             if m:
+    #                 rest = m.group(1)
+    #             if archive_name == search_name or rest == search_name:
+    #                 latest = archive_name
+    #
+    #     if latest is None:
+    #         raise NameError('No latest archive found for \'{}\''.format(search_name))
+    #
+    #     return latest
 
-            archives = d["archives"]
-
-            latest = None
-            for archive_name in sorted(archives):
-                m = re.search('(.*)_\d{4}-\d{2}-\d{2}', archive_name)
-                rest = None
-                if m:
-                    rest = m.group(1)
-                if archive_name == search_name or rest == search_name:
-                    latest = archive_name
-
-        if latest is None:
-            raise NameError('No latest archive found for \'{}\''.format(search_name))
-
-        return latest
-
-    def retrieve(self, archive_name, filename=None, wait_mode=False, print_info=False, fileobj=None):
+    def retrieve(self, archive_id, fileobj, wait_mode=False, print_info=False, dummy=False):
         """
         Initiate a Job, check its status, and download the archive when it's completed.
         """
-        if filename is None:
-            filename = archive_name
-
-        archive_id = self.get_archive_id(archive_name)
-        if not archive_id:
-            raise NameError('No archive_id found for \'{}\''.format(archive_name))
-            return
-        elif print_info:
-                print('Getting archive: {}'.format(archive_name))
+        if dummy:
+            d = open("vault/f{}.txt".format(archive_id), 'rb')
+            fileobj.write(d.read())
+            d.close()
+            return True
+        # archive_id = self.get_archive_id(archive_name)
+        # if not archive_id:
+        #     raise NameError('No archive_id found for \'{}\''.format(archive_name))
+        #     return
+        # elif print_info:
+        #         print('Getting archive: {}'.format(archive_name))
 
         with glacier_shelve(self.shelve_file) as d:
-            if not "jobs" in d:
-                d["jobs"] = dict()
-
             jobs = d["jobs"]
             job = None
 
-            if archive_name in jobs:
+            if archive_id in jobs:
                 if print_info:
-                    print('Some job for archive "{}" found in shelve. Trying to load id'.format(archive_name))
+                    print('Some job for this archive found in shelve. Trying to load it')
                 # The job is already in shelve
-                job_id = jobs[archive_name]
+                job_id = jobs[archive_id]
                 try:
                     job = self.vault.Job(job_id)
                     job.load()
@@ -171,7 +186,7 @@ class GlacierVault:
                 # Job initialization
                 job = self.vault.Archive(archive_id).initiate_archive_retrieval()
                 # job = self.vault.retrieve_archive(archive_id)
-                jobs[archive_name] = job.id
+                jobs[archive_id] = job.id
                 job_id = job.id
 
             # Commiting changes in shelve
@@ -202,84 +217,12 @@ class GlacierVault:
             if print_info:
                 print("Downloading...")
             response = job.get_output()
-            if fileobj is None:
-                with open(filename, 'wb') as f:
-                    f.write(response['body'].read())
-                    if print_info:
-                        print("Ready")
-            else:
-                fileobj.write(response['body'].read())
+
+            fileobj.write(response['body'].read())
+
             return True
 
         else:
             if print_info:
                 print("Job not ready yet.")
             return False
-
-def init_argparse():
-    # create the top-level parser
-    parser = argparse.ArgumentParser(prog='AmazonGlacierBackupLowLevel')
-    # parser.add_argument('--foo', action='store_true', help='foo help')
-    subparsers = parser.add_subparsers(help='There are 2 subcommands. archive and retrive', dest='mode')
-
-    # create the parser for the "archive" command
-    parser_a = subparsers.add_parser('archive', help='Archives the given file in amazon glacier')
-    parser_a.add_argument('archive_name', help='Archive name')
-    parser_a.add_argument('filename', help='Filename')
-
-
-    # create the parser for the "retrive" command
-    parser_b = subparsers.add_parser('retrive', help='Initiates the retrival of the file from amazon glacier')
-    parser_b.add_argument('archive_name', help='Archive name',)
-    parser_b.add_argument('filename', help='Filename')
-    parser_b.add_argument('-w', action='store_true', dest='wait')
-
-    return parser
-
-
-# sv_backup_job
-# Access Key ID:
-# AKIAJOOBFNOL2SBYPBGQ
-# Secret Access Key:
-# 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
-ACCESS_KEY = "AKIAJOOBFNOL2SBYPBGQ"
-SECRET_KEY = "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"
-VAULT = 'sv_backup'
-
-def main():
-    # load config file
-    with open('config.json') as data_file:
-       config = json.load(data_file)
-
-    # test manditory config fields
-    if 'access_key' not in config:
-        raise ConfigError("access_key not in config")
-    if 'secret_key' not in config:
-        raise ConfigError("secret_key not in config")
-    if 'vault' not in config:
-        raise ConfigError("vault not in config")
-    if 'shelve_file' not in config:
-        raise ConfigError("shelve_file not in config")
-
-    parser = init_argparse()
-    arg = parser.parse_args()
-
-    # gv = GlacierVault(VAULT, ACCESS_KEY, SECRET_KEY)
-    gv = GlacierVault(config['vault'],
-                      config['access_key'],
-                      config['secret_key'],
-                      config['shelve_file'])
-
-    if arg.mode == 'archive' and arg.filename is not None:
-        # print('GlacierVault({vault}).upload({archive_name}, {filename} )'.format(vault=VAULT, filename=arg.filename, archive_name=arg.archive_name))
-        gv.upload(filename=arg.filename, archive_name=arg.archive_name, print_info=True)
-    elif arg.mode == 'retrive' and arg.filename is not None:
-        # print('GlacierVault({vault}).retrive({archive_name}, {filename}, {wait})'.format(vault=VAULT, filename=arg.filename, wait=arg.wait, archive_name=arg.archive_name))
-        gv.retrieve(filename=arg.filename, archive_name=arg.archive_name, wait_mode=arg.wait, print_info=True)
-    else:
-        parser.print_help()
-
-
-if __name__ == '__main__':
-    main()
-    # s_main()

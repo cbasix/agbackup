@@ -3,6 +3,7 @@ from agcrypt import AESCipher
 from agmain import Agbackup
 import io
 import tempfile
+from datetime import datetime
 
 
 class TestStringMethods(unittest.TestCase):
@@ -16,6 +17,7 @@ class TestStringMethods(unittest.TestCase):
         crypt.encrypt(in_data, encr_data)
         crypt.decrypt(encr_data, decr_data)
 
+        self.assertNotEqual(in_data.getvalue(), encr_data.getvalue())
         self.assertEqual(in_data.getvalue(), decr_data.getvalue())
 
     def test_tar(self):
@@ -44,6 +46,27 @@ class TestStringMethods(unittest.TestCase):
         # input_file = open('example.tar.gz', 'rb')
         decr_data.seek(0)
         Agbackup._extract_tarfile(output_folder='important_extracted', source_file=decr_data)
+
+    def test_dict_latest(self):
+        d = {
+            "s2difjsodfjaposiejghasodf": {"date": 2, },
+            "s1difjsodfjaposiejghasodf": {"date": 1, },
+            "s4difjsodfjaposiejghasodf": {"date": 4, },
+            "s3difjsodfjaposiejghasodf": {"date": 3, },
+        }
+
+        self.assertEqual("s4difjsodfjaposiejghasodf", Agbackup.get_latest_from_dict(d, 'date')[0])
+
+    def test_dict_latest2(self):
+        d = {
+            "s2difjsodfjaposiejghasodf": {"date": datetime(2012,2,1,5,8),},
+            "s1difjsodfjaposiejghasodf": {"date": datetime(2011,2,1,5,8),},
+            "s4difjsodfjaposiejghasodf": {"date": datetime(2014,2,1,5,8),},
+            "s3difjsodfjaposiejghasodf": {"date": datetime(2013,2,1,5,8),},
+        }
+
+        self.assertEqual("s4difjsodfjaposiejghasodf", Agbackup.get_latest_from_dict(d, 'date')[0])
+        self.assertEqual({"date": datetime(2014,2,1,5,8),}, Agbackup.get_latest_from_dict(d, 'date')[1])
 
 
 
